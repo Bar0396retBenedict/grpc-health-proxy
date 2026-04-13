@@ -2,64 +2,55 @@ package health
 
 import (
 	"context"
-	"log/slog"
+	"log"
 	"time"
+
+	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
-// Poller periodically runs a health check and writes results to a Cache.
+// Poller periodically checks the health of a gRPC service and updates a Cache.
 type Poller struct {
-	checker     *Checker
-	cache       *Cache
-	interval    time.Duration
-	serviceName string
-	logger      *slog.Logger
+	checker  *Checker
+	cache    *Cache
+	interval time.Duration
 }
 
-// NewPoller creates a Poller that checks the given service on the provided interval.
-func NewPoller(checker *Checker, cache *Cache, interval time.Duration, serviceName string, logger *slog.Logger) *Poller {
-	if logger == nil {
-		logger = slog.Default()
-	}
+// NewPoller creates a new Poller with the given checker, cache, and poll interval.
+func NewPoller(checker *Checker, cache *Cache, interval time.Duration) *Poller {
 	return &Poller{
-		checker:     checker,
-		cache:       cache,
-		interval:    interval,
-		serviceName: serviceName,
-		logger:      logger,
+		checker:  checker,
+		cache:    cache,
+		interval: interval,
 	}
 }
 
-// Run starts the polling loop and blocks until ctx is cancelled.
-func (p *Poller) Run(ctx context.Context) {
-	p.poll(ctx)
-
+// Start begins polling the gRPC health endpoint for the given service name.
+// It blocks until the context is cancelled, then returns.
+func (p *Poller) Start(ctx context.Context, service string) {
 	ticker := time.NewTicker(p.interval)
 	defer ticker.Stop()
 
+	// Run an immediate check before waiting for the first tick.
+	p.poll(ctx, service)
+
 	for {
 		select {
-		case <-ticker.C:
-			p.poll(ctx)
 		case <-ctx.Done():
-			p.logger.Info("health poller stopped")
+			log.Printf("poller: stopping for service %q", service)
 			return
+		case <-ticker.C:
+			p.poll(ctx, service)
 		}
 	}
 }
 
-func (p *Poller) poll(ctx context.Context) {
-	status, err := p.checker.Check(ctx, p.serviceName)
-	p.cache.Set(status, err)
-
+func (p *Poller) poll(ctx context.Context, service string) {
+	status, err := p.checker.Check(ctx, service)
 	if err != nil {
-		p.logger.Warn("health check failed",
-			slog.String("service", p.serviceName),
-			slog.String("error", err.Error()),
-		)
+		log.Printf("poller: health check error for service %q: %v", service, err)
+		p.cache.Set(service, grpc_health_v1.HealthCheckResponse_UNKNOWN, err)
 		return
 	}
-	p.logger.Debug("health check completed",
-		slog.String("service", p.serviceName),
-		slog.String("status", status.String()),
-	)
+	p.cache.Set(service, status, nil)
+	log.Printf("poller: service %q status=%v", service, status)
 }

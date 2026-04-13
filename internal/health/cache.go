@@ -1,47 +1,51 @@
 package health
 
 import (
+	"fmt"
 	"sync"
-	"time"
+
+	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
-// CachedStatus holds the last known health status and when it was recorded.
-type CachedStatus struct {
-	Status    Status
-	Err       error
-	CheckedAt time.Time
+// entry holds a cached health status and any associated error.
+type entry struct {
+	status grpc_health_v1.HealthCheckResponse_ServingStatus
+	err    error
 }
 
-// Cache stores the most recent health check result and provides thread-safe access.
+// Cache is a thread-safe store for gRPC health check results keyed by service name.
 type Cache struct {
-	mu     sync.RWMutex
-	latest CachedStatus
+	mu      sync.RWMutex
+	entries map[string]entry
 }
 
-// NewCache initialises a Cache with an unknown status.
+// NewCache returns an initialised Cache.
 func NewCache() *Cache {
 	return &Cache{
-		latest: CachedStatus{
-			Status:    StatusUnknown,
-			CheckedAt: time.Now(),
-		},
+		entries: make(map[string]entry),
 	}
 }
 
-// Set stores a new health result.
-func (c *Cache) Set(status Status, err error) {
+// Set stores the status and error for the given service name.
+func (c *Cache) Set(service string, status grpc_health_v1.HealthCheckResponse_ServingStatus, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.latest = CachedStatus{
-		Status:    status,
-		Err:       err,
-		CheckedAt: time.Now(),
-	}
+	c.entries[service] = entry{status: status, err: err}
 }
 
-// Get returns the most recent cached status.
-func (c *Cache) Get() CachedStatus {
+// Get returns the cached status for the given service name.
+// If the service has never been set it returns UNKNOWN.
+// If the cached entry contains an error, that error is returned.
+func (c *Cache) Get(service string) (grpc_health_v1.HealthCheckResponse_ServingStatus, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.latest
+
+	e, ok := c.entries[service]
+	if !ok {
+		return grpc_health_v1.HealthCheckResponse_UNKNOWN, nil
+	}
+	if e.err != nil {
+		return e.status, fmt.Errorf("cached health error: %w", e.err)
+	}
+	return e.status, nil
 }
