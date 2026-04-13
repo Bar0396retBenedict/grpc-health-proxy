@@ -48,3 +48,11 @@ func TestRequestCountingMiddleware_DoesNotAffectInnerResponse(t *testing.T) {
 		t.Error("counter should still be incremented")
 	}
 }
+
+func TestRequestCountingMiddleware_StartsAtZero(t *testing.T) {
+	c := &Counters{}
+
+	if got := c.HTTPRequestTotal.Load(); got != 0 {
+		t.Errorf("counter should start at zero, got %d", got)
+	}
+}
