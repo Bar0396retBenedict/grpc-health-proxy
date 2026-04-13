@@ -33,3 +33,15 @@ func WithRetryAndCircuitBreaker(cb *CircuitBreaker, cfg RetryConfig, fn CheckFun
 	protected := WithCircuitBreaker(cb, fn)
 	return WithRetry(cfg, protected)
 }
+
+// WithFallback wraps a CheckFunc so that if it fails, the provided fallback
+// CheckFunc is invoked instead. The error returned by the fallback (if any)
+// is returned to the caller. This is useful for degraded-mode health checks.
+func WithFallback(fn CheckFunc, fallback CheckFunc) CheckFunc {
+	return func(ctx context.Context) error {
+		if err := fn(ctx); err != nil {
+			return fallback(ctx)
+		}
+		return nil
+	}
+}
