@@ -6,14 +6,28 @@ import (
 	"time"
 )
 
+// responseWriter wraps http.ResponseWriter to capture the status code.
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func newResponseWriter(w http.ResponseWriter) *responseWriter {
+	return &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
+
 // LoggingMiddleware logs each incoming HTTP request with method, path, status, and duration.
 func LoggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		rw := newResponseWriter(w)
 		next.ServeHTTP(rw, r)
-		duration := time.Since(start)
-		log.Printf("%s %s %d %s", r.Method, r.URL.Path, rw.statusCode, duration)
+		log.Printf("%s %s %d %s", r.Method, r.URL.Path, rw.statusCode, time.Since(start))
 	})
 }
 
@@ -22,7 +36,7 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				log.Printf("recovered from panic: %v", rec)
+				log.Printf("panic recovered: %v", rec)
 				http.Error(w, "internal server error", http.StatusInternalServerError)
 			}
 		}()
@@ -30,13 +44,10 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// responseWriter wraps http.ResponseWriter to capture the status code.
-type responseWriter struct {
-	http.ResponseWriter
-	statusCode int
-}
-
-func (rw *responseWriter) WriteHeader(code int) {
-	rw.statusCode = code
-	rw.ResponseWriter.WriteHeader(code)
+// Chain applies a list of middlewares to a handler in order (outermost first).
+func Chain(h http.Handler, middlewares ...func(http.Handler) http.Handler) http.Handler {
+	for i := len(middlewares) - 1; i >= 0; i-- {
+		h = middlewares[i](h)
+	}
+	return h
 }
