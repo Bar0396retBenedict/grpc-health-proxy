@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"fmt"
 	"net/http"
 	"sync/atomic"
 )
@@ -50,27 +51,11 @@ func (c *Counters) Handler() http.Handler {
 
 // Format returns a human-readable snapshot of the counters.
 func (c *Counters) Format() string {
-	return "health_check_total " + itoa(c.HealthCheckTotal.Load()) + "\n" +
-		"health_check_success " + itoa(c.HealthCheckSuccess.Load()) + "\n" +
-		"health_check_failure " + itoa(c.HealthCheckFailure.Load()) + "\n" +
-		"http_request_total " + itoa(c.HTTPRequestTotal.Load()) + "\n"
-}
-
-func itoa(n int64) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	buf := make([]byte, 0, 20)
-	for n > 0 {
-		buf = append([]byte{byte('0' + n%10)}, buf...)
-		n /= 10
-	}
-	if neg {
-		buf = append([]byte{'-'}, buf...)
-	}
-	return string(buf)
+	return fmt.Sprintf(
+		"health_check_total %d\nhealth_check_success %d\nhealth_check_failure %d\nhttp_request_total %d\n",
+		c.HealthCheckTotal.Load(),
+		c.HealthCheckSuccess.Load(),
+		c.HealthCheckFailure.Load(),
+		c.HTTPRequestTotal.Load(),
+	)
 }
