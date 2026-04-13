@@ -7,17 +7,16 @@ import (
 	"github.com/your-org/grpc-health-proxy/internal/metrics"
 )
 
-// NewServeMux builds the HTTP router, wiring health and metrics endpoints.
-// All routes are wrapped with the request-counting middleware.
-func NewServeMux(cache *health.Cache, counters *metrics.Counters) *http.ServeMux {
+// NewServeMux builds and returns the HTTP mux with all routes registered.
+func NewServeMux(cache *health.Cache) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	healthHandler := NewHealthHandler(cache)
-	livenessHandler := http.HandlerFunc(LivenessHandler)
+	logged := LoggingMiddleware(RecoveryMiddleware(metrics.RequestCountingMiddleware(healthHandler)))
 
-	mux.Handle("/healthz", metrics.RequestCountingMiddleware(counters, healthHandler))
-	mux.Handle("/livez", metrics.RequestCountingMiddleware(counters, livenessHandler))
-	mux.Handle("/metrics", counters.Handler())
+	mux.Handle("/health", logged)
+	mux.Handle("/healthz", LoggingMiddleware(RecoveryMiddleware(http.HandlerFunc(LivenessHandler))))
+	mux.Handle("/metrics", LoggingMiddleware(RecoveryMiddleware(metrics.Handler())))
 
 	return mux
 }
