@@ -1,35 +1,23 @@
 package server
 
 import (
-	"fmt"
 	"net/http"
 
-	"github.com/grpc-health-proxy/internal/config"
-	"github.com/grpc-health-proxy/internal/health"
+	"github.com/your-org/grpc-health-proxy/internal/health"
+	"github.com/your-org/grpc-health-proxy/internal/metrics"
 )
 
-// NewServeMux builds and returns an HTTP mux with all registered routes.
-//
-// Routes:
-//
-//	GET /healthz            — liveness probe (always 200)
-//	GET /ready              — readiness based on default service ("") health
-//	GET /health/{service}   — readiness for a named gRPC service
-func NewServeMux(cfg *config.Config, cache *health.Cache) *http.ServeMux {
+// NewServeMux builds the HTTP router, wiring health and metrics endpoints.
+// All routes are wrapped with the request-counting middleware.
+func NewServeMux(cache *health.Cache, counters *metrics.Counters) *http.ServeMux {
 	mux := http.NewServeMux()
 
-	// Liveness
-	mux.HandleFunc("/healthz", LivenessHandler)
+	healthHandler := NewHealthHandler(cache)
+	livenessHandler := http.HandlerFunc(LivenessHandler)
 
-	// Readiness for the default (empty) service name
-	defaultHandler := NewHealthHandler(cache, "")
-	mux.Handle("/ready", defaultHandler)
-
-	// Per-service readiness endpoints
-	for _, svc := range cfg.Services {
-		path := fmt.Sprintf("/health/%s", svc)
-		mux.Handle(path, NewHealthHandler(cache, svc))
-	}
+	mux.Handle("/healthz", metrics.RequestCountingMiddleware(counters, healthHandler))
+	mux.Handle("/livez", metrics.RequestCountingMiddleware(counters, livenessHandler))
+	mux.Handle("/metrics", counters.Handler())
 
 	return mux
 }
