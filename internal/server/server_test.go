@@ -22,6 +22,21 @@ func freePort(t *testing.T) string {
 	return fmt.Sprintf("127.0.0.1:%d", l.Addr().(*net.TCPAddr).Port)
 }
 
+// waitForServer polls the given URL until it responds or the timeout is reached.
+func waitForServer(t *testing.T, url string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("server at %s did not become ready within %s", url, timeout)
+}
+
 func TestServer_StartAndShutdown(t *testing.T) {
 	addr := freePort(t)
 	cfg := &config.Config{
@@ -43,8 +58,8 @@ func TestServer_StartAndShutdown(t *testing.T) {
 		errCh <- srv.Start()
 	}()
 
-	// Wait for server to be ready.
-	time.Sleep(50 * time.Millisecond)
+	// Wait for server to be ready before sending requests.
+	waitForServer(t, fmt.Sprintf("http://%s/healthz", addr), 2*time.Second)
 
 	resp, err := http.Get(fmt.Sprintf("http://%s/healthz", addr))
 	if err != nil {
