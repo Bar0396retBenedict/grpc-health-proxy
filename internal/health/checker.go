@@ -1,52 +1,50 @@
+// Package health provides gRPC health checking primitives.
 package health
 
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
-// Checker performs gRPC health checks against a remote service.
-type Checker struct {
-	addr    string
-	cb      *CircuitBreaker
-	dialOpt grpc.DialOption
+// CheckFn is the signature for a health-check function.
+type CheckFn func(ctx context.Context, service string) (healthy bool, err error)
+
+// CheckerConfig holds options for NewChecker.
+type CheckerConfig struct {
+	Addrstring
+	DialTLSC    credentials.TransportCredentials
 }
 
-// NewChecker creates a Checker targeting the given gRPC address.
-func NewChecker(addr string) *Checker {
-	return &Checker{
-		addr:    addr,
-		cb:      NewCircuitBreaker(DefaultCircuitBreakerConfig()),
-		dialOpt: grpc.WithTransportCredentials(insecure.NewCredentials()),
-	}
-}
+// NewChecker returns a CheckFn that queries the gRPC health service at the
+// address specified in cfg.
+func NewChecker(cfg CheckerConfig) CheckFn {
+	return func(ctx context.Context, service string) (bool, error) {
+		dialCtx, cancel := context.WithTimeout(ctx, cfg.DialTimeout)
+		defer cancel()
 
-// Check performs a single gRPC health check for the named service.
-// An empty service name checks the overall server health.
-func (c *Checker) Check(ctx context.Context, service string) (grpc_health_v1.HealthCheckResponse_ServingStatus, error) {
-	if !c.cb.Allow() {
-		return grpc_health_v1.HealthCheckResponse_UNKNOWN,
-			fmt.Errorf("circuit breaker open: too many recent failures for %s", c.addr)
-	}
+		creds := cfg.TLSCreds
+		if creds == nil {
+			creds = insecure.NewCredentials()
+		}
 
-	conn, err := grpc.NewClient(c.addr, c.dialOpt)
-	if err != nil {
-		c.cb.RecordFailure()
-		return grpc_health_v1.HealthCheckResponse_UNKNOWN, fmt.Errorf("dial %s: %w", c.addr, err)
-	}
-	defer conn.Close()
+		conn, err := grpc.DialContext(dialCtx, cfg.Addr, grpc.WithTransportCredentials(creds)) //nolint:staticcheck
+		if err != nil {
+			return false, fmt.Errorf("dial %s: %w", cfg.Addr, err)
+		}
+		defer conn.Close()
 
-	client := grpc_health_v1.NewHealthClient(conn)
-	resp, err := client.Check(ctx, &grpc_health_v1.HealthCheckRequest{Service: service})
-	if err != nil {
-		c.cb.RecordFailure()
-		return grpc_health_v1.HealthCheckResponse_UNKNOWN, fmt.Errorf("health check %s: %w", service, err)
-	}
+		client := grpc_health_v1.NewHealthClient(conn)
+		resp, err := client.Check(ctx, &grpc_health_v1.HealthCheckRequest{Service: service})
+		if err != nil {
+			return false, fmt.Errorf("health check rpc: %w", err)
+		}
 
-	c.cb.RecordSuccess()
-	return resp.GetStatus(), nil
+		return resp.GetStatus() == grpc_health_v1.HealthCheckResponse_SERVING, nil
+	}
 }
