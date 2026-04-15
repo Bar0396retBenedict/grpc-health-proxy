@@ -30,6 +30,20 @@ func (w *Watcher) Subscribe() <-chan Status {
 	return ch
 }
 
+// Unsubscribe removes the given channel from the listener list and closes it.
+// It is safe to call Unsubscribe concurrently with Watch.
+func (w *Watcher) Unsubscribe(sub <-chan Status) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for i, ch := range w.listeners {
+		if ch == sub {
+			w.listeners = append(w.listeners[:i], w.listeners[i+1:]...)
+			close(ch)
+			return
+		}
+	}
+}
+
 // Watch polls the cache for the named service at each tick from the poller
 // and broadcasts status changes to all subscribers until ctx is cancelled.
 func (w *Watcher) Watch(ctx context.Context, service string, updates <-chan Status) {
