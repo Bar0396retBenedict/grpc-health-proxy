@@ -26,7 +26,14 @@ type CheckFunc func(ctx context.Context, service string) (bool, error)
 // deadline derived from cfg.Timeout. If the deadline is exceeded the call
 // returns false and a descriptive error; the underlying context is always
 // cancelled to release resources.
+//
+// If cfg.Timeout is zero or negative, next is called without any additional
+// timeout constraint.
 func WithTimeout(cfg TimeoutConfig, next CheckFunc) CheckFunc {
+	if cfg.Timeout <= 0 {
+		return next
+	}
+
 	return func(ctx context.Context, service string) (bool, error) {
 		ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 		defer cancel()
